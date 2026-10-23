@@ -1,0 +1,71 @@
+# =====================================================================
+# Clúster RabbitMQ de 2 nodos (rabbit1 + rabbit2) para el backend Biblioteca.
+#
+#   docker compose up -d
+#   docker exec rabbit1 rabbitmqctl cluster_status     # debe listar rabbit1 y rabbit2
+#
+# Panel web:  http://localhost:15672 (nodo 1)  y  http://localhost:15673 (nodo 2)
+# AMQP:       localhost:5672 (nodo 1)  y  localhost:5673 (nodo 2)
+# Usuario/clave: variables RABBITMQ_USER / RABBITMQ_PASSWORD (ver .env.example).
+#
+# NOTA: no se usa guest/guest porque RabbitMQ solo lo permite desde localhost
+# dentro del contenedor; desde el host (o la nube) hay que usar otro usuario.
+# =====================================================================
+name: biblioteca-rabbit
+
+x-rabbit-comun: &rabbit-comun
+  image: rabbitmq:3.13-management
+  restart: unless-stopped
+  environment: &rabbit-env
+    # Todos los nodos de un clúster deben compartir la misma cookie de Erlang.
+    RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-BIBLIOTECA_CLUSTER_COOKIE}
+    RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-biblioteca}
+    RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-biblioteca123}
+  healthcheck:
+    test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+    interval: 15s
+    timeout: 10s
+    retries: 10
+    start_period: 30s
+  networks:
+    - rabbit-net
+
+services:
+  rabbit1:
+    <<: *rabbit-comun
+    container_name: rabbit1
+    hostname: rabbit1
+    environment:
+      <<: *rabbit-env
+      RABBITMQ_NODENAME: rabbit@rabbit1
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-cluster.conf:ro
+      - rabbit1-data:/var/lib/rabbitmq
+
+  rabbit2:
+    <<: *rabbit-comun
+    container_name: rabbit2
+    hostname: rabbit2
+    environment:
+      <<: *rabbit-env
+      RABBITMQ_NODENAME: rabbit@rabbit2
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-cluster.conf:ro
+      - rabbit2-data:/var/lib/rabbitmq
+    depends_on:
+      rabbit1:
+        condition: service_healthy
+
+networks:
+  rabbit-net:
+    driver: bridge
+
+volumes:
+  rabbit1-data:
+  rabbit2-data:

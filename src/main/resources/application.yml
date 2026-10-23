@@ -1,0 +1,109 @@
+# =====================================================================
+# Configuración del backend Biblioteca
+# Los valores con ${VARIABLE:defecto} se pueden sobreescribir con
+# variables de entorno (útil para la nube / docker-compose).
+# =====================================================================
+spring:
+  application:
+    name: biblioteca-backend
+
+  # Base de datos H2 en memoria (los datos se pierden al reiniciar).
+  # Consola en http://localhost:8080/h2-console
+  datasource:
+    url: jdbc:h2:mem:biblioteca_db;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  # Conexión al clúster RabbitMQ (2 nodos, ver docker-compose.yml).
+  # Con varias direcciones el cliente prueba la siguiente si un nodo cae.
+  rabbitmq:
+    addresses: ${RABBITMQ_ADDRESSES:localhost:5672,localhost:5673}
+    username: ${RABBITMQ_USER:biblioteca}
+    password: ${RABBITMQ_PASSWORD:biblioteca123}
+    virtual-host: /
+    listener:
+      simple:
+        acknowledge-mode: manual   # cada consumidor hace ACK/NACK explícito
+        prefetch: 10
+      direct:
+        acknowledge-mode: manual
+
+server:
+  port: 8080
+
+logging:
+  level:
+    com.biblioteca: DEBUG
+    org.springframework.amqp: INFO
+
+# =====================================================================
+# Propiedades propias de la aplicación
+# =====================================================================
+app:
+  # Microsoft Entra ID / JWT
+  security:
+    issuer-uri: https://sts.windows.net/a94e2d64-6e37-4765-8ceb-bfe6bc09932b/
+    audience: api://a328191c-fd63-40fc-8994-b9260a828929
+    jwk-set-uri: https://login.microsoftonline.com/a94e2d64-6e37-4765-8ceb-bfe6bc09932b/discovery/v2.0/keys
+    # Orígenes permitidos por CORS (separados por coma).
+    cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+
+  # ---------------------------------------------------------------
+  # Topología de RabbitMQ: TODOS los nombres de colas, exchanges y
+  # routing keys viven aquí. El código Java solo los lee.
+  # ---------------------------------------------------------------
+  rabbit:
+    vhost: /
+    # API HTTP del plugin management (se usa para LISTAR colas, exchanges y bindings).
+    management:
+      url: ${RABBITMQ_MANAGEMENT_URL:http://localhost:15672}
+
+    retry:
+      max-attempts: 3          # reintentos ante errores recuperables antes de ir a la DLQ
+
+    # Si es true, un listener consume las DLQ y registra cada mensaje muerto en logs.
+    # En false los mensajes se quedan en la DLQ para verlos en el panel de RabbitMQ.
+    dlq-listener:
+      enabled: false
+
+    exchanges:
+      direct: biblioteca.direct   # tickets y documentos (routing key exacta)
+      topic: biblioteca.topic     # notificaciones (routing key con patrón)
+      dlx: biblioteca.dlx         # dead letter exchange compartido por las 3 DLQ
+
+    queues:
+      notificaciones:
+        name: notificaciones.queue
+        routing-key: notificacion.#          # patrón de binding (exchange topic)
+        dlq: notificaciones.dlq
+        dlq-routing-key: notificaciones.dead
+      tickets:
+        name: tickets.queue
+        routing-key: ticket.crear            # binding exacto (exchange direct)
+        dlq: tickets.dlq
+        dlq-routing-key: tickets.dead
+      documentos:
+        name: documentos.queue
+        routing-key: documento.generar       # binding exacto (exchange direct)
+        dlq: documentos.dlq
+        dlq-routing-key: documentos.dead
+
+    # Routing keys con las que se PUBLICAN los eventos de préstamos
+    # (calzan con el patrón notificacion.# del binding de notificaciones).
+    routing:
+      notificacion-prestamo-creado: notificacion.prestamo.creado
+      notificacion-prestamo-devuelto: notificacion.prestamo.devuelto

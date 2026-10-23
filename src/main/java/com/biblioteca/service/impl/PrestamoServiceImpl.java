@@ -6,6 +6,7 @@ import com.biblioteca.entity.Prestamo;
 import com.biblioteca.entity.Usuario;
 import com.biblioteca.exception.OperacionInvalidaException;
 import com.biblioteca.exception.RecursoNoEncontradoException;
+import com.biblioteca.messaging.producer.PrestamoEventos;
 import com.biblioteca.repository.LibroRepository;
 import com.biblioteca.repository.PrestamoRepository;
 import com.biblioteca.repository.UsuarioRepository;
@@ -28,15 +29,18 @@ public class PrestamoServiceImpl implements PrestamoService {
     private final LibroRepository libroRepository;
     private final UsuarioRepository usuarioRepository;
     private final LibroService libroService;
+    private final PrestamoEventos prestamoEventos;
 
     public PrestamoServiceImpl(PrestamoRepository prestamoRepository,
                                 LibroRepository libroRepository,
                                 UsuarioRepository usuarioRepository,
-                                LibroService libroService) {
+                                LibroService libroService,
+                                PrestamoEventos prestamoEventos) {
         this.prestamoRepository = prestamoRepository;
         this.libroRepository = libroRepository;
         this.usuarioRepository = usuarioRepository;
         this.libroService = libroService;
+        this.prestamoEventos = prestamoEventos;
     }
 
     @Override
@@ -85,6 +89,10 @@ public class PrestamoServiceImpl implements PrestamoService {
         // quedó guardado correctamente.
         libroService.decrementarDisponibilidad(libro.getId());
 
+        // Mensajería asíncrona (notificación + ticket). No lanza excepciones:
+        // si RabbitMQ falla, el préstamo igual queda creado.
+        prestamoEventos.prestamoCreado(guardado);
+
         return guardado;
     }
 
@@ -113,6 +121,9 @@ public class PrestamoServiceImpl implements PrestamoService {
         Prestamo actualizado = prestamoRepository.save(prestamo);
 
         libroService.incrementarDisponibilidad(prestamo.getLibro().getId());
+
+        // Mensajería asíncrona (notificación + comprobante). No afecta la devolución si falla.
+        prestamoEventos.prestamoDevuelto(actualizado);
 
         return actualizado;
     }
