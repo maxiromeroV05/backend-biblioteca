@@ -1,0 +1,10 @@
+# Microservicio administrador de Kafka: tópicos, configuraciones,
+# consumer groups y publicación de prueba.
+spring:
+  application:
+    name: biblioteca-admin-kafka
+  config:
+    import: classpath:application-common.yml
+
+server:
+  port: ${KAFKA_ADMIN_PORT:8081}

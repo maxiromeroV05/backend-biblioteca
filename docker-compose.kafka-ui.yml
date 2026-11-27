@@ -1,0 +1,36 @@
+# =====================================================================
+# Kafka-UI: panel web para administrar brokers y tópicos del clúster Kafka.
+#
+# REQUISITO: el clúster debe estar levantado antes (este archivo se conecta a su red):
+#
+#   docker compose -f docker-compose.kafka.yml up -d
+#   docker compose -f docker-compose.kafka-ui.yml up -d
+#
+# Panel web:  http://localhost:8085
+#   (se usa el 8085 y no el 8080 porque el 8080 lo ocupa el backend Spring Boot)
+#
+# Desde el panel se pueden ver los brokers, crear/modificar/eliminar tópicos
+# y sus configuraciones, revisar mensajes, consumer groups y el estado de las particiones.
+# =====================================================================
+name: biblioteca-kafka-ui
+
+services:
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: kafka-ui
+    restart: unless-stopped
+    ports:
+      - "8085:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: biblioteca
+      # Listeners INTERNOS de los brokers (los contenedores se ven por nombre dentro de la red).
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka1:29092,kafka2:29092,kafka3:29092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    networks:
+      - kafka-net
+
+networks:
+  kafka-net:
+    # Red creada por docker-compose.kafka.yml.
+    external: true
+    name: biblioteca-kafka-net

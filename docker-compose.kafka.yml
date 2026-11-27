@@ -1,0 +1,182 @@
+# =====================================================================
+# Clúster Kafka con ZooKeeper y 3 brokers para el backend Biblioteca.
+#
+#   docker compose -f docker-compose.kafka.yml up -d
+#   docker compose -f docker-compose.kafka.yml ps   # 3 ZooKeeper + 3 brokers "healthy"
+#
+# Topología (rúbrica EP5): 3 nodos ZooKeeper (quorum) + 3 brokers, SIN KRaft.
+# Los tópicos de la aplicación los crea el backend al arrancar (KafkaTopicsConfig)
+# o se administran por la API REST (/api/kafka/topics) y por Kafka-UI.
+#
+# Conexión:
+#   - Desde tu equipo (backend Spring Boot):  localhost:9092, localhost:9093, localhost:9094
+#   - Entre contenedores (Kafka-UI):          kafka1:29092, kafka2:29092, kafka3:29092
+#   - ZooKeeper (solo diagnóstico):           localhost:2181/2182/2183
+#
+# Cada broker tiene DOS listeners:
+#   INTERNAL  kafka<N>:29092     tráfico entre brokers y desde otros contenedores
+#   EXTERNAL  localhost:909<N>   tráfico desde el host (el equipo donde corre Docker)
+#
+# Para apagar:  docker compose -f docker-compose.kafka.yml down      (conserva los datos)
+#               docker compose -f docker-compose.kafka.yml down -v   (borra también los datos)
+# =====================================================================
+name: biblioteca-kafka
+
+x-zookeeper-comun: &zookeeper-comun
+  image: confluentinc/cp-zookeeper:7.6.1
+  restart: unless-stopped
+  networks:
+    - kafka-net
+  healthcheck:
+    # "srvr" responde con el modo (leader/follower) solo cuando el quorum está
+    # operativo; evita que los brokers arranquen antes de que ZooKeeper esté listo.
+    test: ["CMD-SHELL", "echo srvr | nc -w 2 localhost 2181 | grep -q '^Mode:'"]
+    interval: 10s
+    timeout: 5s
+    retries: 15
+    start_period: 20s
+
+x-zookeeper-env: &zookeeper-env
+  ZOOKEEPER_CLIENT_PORT: 2181
+  ZOOKEEPER_TICK_TIME: 2000
+  ZOOKEEPER_INIT_LIMIT: 10
+  ZOOKEEPER_SYNC_LIMIT: 5
+  # Formato: host:puerto_elección:puerto_quorum. El orden define el id (1,2,3),
+  # que debe coincidir con ZOOKEEPER_SERVER_ID de cada nodo.
+  ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
+
+x-kafka-comun: &kafka-comun
+  image: confluentinc/cp-kafka:7.6.1
+  restart: unless-stopped
+  depends_on:
+    zookeeper1:
+      condition: service_healthy
+    zookeeper2:
+      condition: service_healthy
+    zookeeper3:
+      condition: service_healthy
+  networks:
+    - kafka-net
+  healthcheck:
+    test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:29092 > /dev/null 2>&1"]
+    interval: 15s
+    timeout: 10s
+    retries: 10
+    start_period: 30s
+
+x-kafka-env: &kafka-env
+  # Cadena de conexión al quorum completo: si un nodo cae, el broker usa otro.
+  KAFKA_ZOOKEEPER_CONNECT: zookeeper1:2181,zookeeper2:2181,zookeeper3:2181
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  # Con 3 brokers los tópicos de sistema y los nuevos se replican en los 3,
+  # y se exige que al menos 2 réplicas confirmen cada escritura (acks=all).
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  # Los tópicos se crean de forma explícita (backend / API / Kafka-UI), no al publicar.
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_DELETE_TOPIC_ENABLE: "true"
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+  KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
+
+services:
+  zookeeper1:
+    <<: *zookeeper-comun
+    container_name: zookeeper1
+    hostname: zookeeper1
+    environment:
+      <<: *zookeeper-env
+      ZOOKEEPER_SERVER_ID: 1
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper1-data:/var/lib/zookeeper/data
+      - zookeeper1-log:/var/lib/zookeeper/log
+
+  zookeeper2:
+    <<: *zookeeper-comun
+    container_name: zookeeper2
+    hostname: zookeeper2
+    environment:
+      <<: *zookeeper-env
+      ZOOKEEPER_SERVER_ID: 2
+    ports:
+      - "2182:2181"
+    volumes:
+      - zookeeper2-data:/var/lib/zookeeper/data
+      - zookeeper2-log:/var/lib/zookeeper/log
+
+  zookeeper3:
+    <<: *zookeeper-comun
+    container_name: zookeeper3
+    hostname: zookeeper3
+    environment:
+      <<: *zookeeper-env
+      ZOOKEEPER_SERVER_ID: 3
+    ports:
+      - "2183:2181"
+    volumes:
+      - zookeeper3-data:/var/lib/zookeeper/data
+      - zookeeper3-log:/var/lib/zookeeper/log
+
+  kafka1:
+    <<: *kafka-comun
+    container_name: kafka1
+    hostname: kafka1
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 1
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:29092,EXTERNAL://localhost:9092
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka1-data:/var/lib/kafka/data
+
+  kafka2:
+    <<: *kafka-comun
+    container_name: kafka2
+    hostname: kafka2
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 2
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka2:29092,EXTERNAL://localhost:9093
+    ports:
+      - "9093:9093"
+    volumes:
+      - kafka2-data:/var/lib/kafka/data
+
+  kafka3:
+    <<: *kafka-comun
+    container_name: kafka3
+    hostname: kafka3
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 3
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka3:29092,EXTERNAL://localhost:9094
+    ports:
+      - "9094:9094"
+    volumes:
+      - kafka3-data:/var/lib/kafka/data
+
+networks:
+  kafka-net:
+    # Nombre fijo para que docker-compose.kafka-ui.yml se conecte a esta misma red.
+    name: biblioteca-kafka-net
+    driver: bridge
+
+volumes:
+  zookeeper1-data:
+  zookeeper1-log:
+  zookeeper2-data:
+  zookeeper2-log:
+  zookeeper3-data:
+  zookeeper3-log:
+  kafka1-data:
+  kafka2-data:
+  kafka3-data:

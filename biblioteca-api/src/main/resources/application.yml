@@ -1,0 +1,10 @@
+# Microservicio API: libros, autores, usuarios, préstamos, notificaciones,
+# productores/consumidores RabbitMQ y Kafka.
+spring:
+  application:
+    name: biblioteca-api
+  config:
+    import: classpath:application-common.yml
+
+server:
+  port: ${API_PORT:8080}

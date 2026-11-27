@@ -1,0 +1,186 @@
+# =====================================================================
+# Configuración COMPARTIDA de los microservicios del backend Biblioteca.
+# Los valores con ${VARIABLE:defecto} se pueden sobreescribir con
+# variables de entorno. Cada microservicio importa este archivo desde su
+# application.yml y añade solo su nombre y su puerto.
+# =====================================================================
+spring:
+  # Base de datos. Por defecto H2 en memoria (desarrollo local; los datos se
+  # pierden al reiniciar). Para usar la base de datos CLOUD (PostgreSQL) se
+  # activa el perfil "cloud" (ver application-cloud.yml) y se definen
+  # DB_URL, DB_USERNAME y DB_PASSWORD como variables de entorno.
+  # El driver se detecta solo a partir del prefijo de la URL (jdbc:h2 / jdbc:postgresql).
+  datasource:
+    url: ${DB_URL:jdbc:h2:mem:biblioteca_db;DB_CLOSE_DELAY=-1}
+    username: ${DB_USERNAME:sa}
+    password: ${DB_PASSWORD:}
+  h2:
+    console:
+      enabled: ${H2_CONSOLE_ENABLED:true}   # consola en http://localhost:8080/h2-console
+      path: /h2-console
+
+  jpa:
+    hibernate:
+      ddl-auto: ${DDL_AUTO:update}
+    show-sql: ${JPA_SHOW_SQL:true}
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  # Conexión al clúster RabbitMQ (2 nodos, ver docker-compose.yml).
+  # Con varias direcciones el cliente prueba la siguiente si un nodo cae.
+  rabbitmq:
+    addresses: ${RABBITMQ_ADDRESSES:localhost:5672,localhost:5673}
+    username: ${RABBITMQ_USER:biblioteca}
+    password: ${RABBITMQ_PASSWORD:biblioteca123}
+    virtual-host: /
+    listener:
+      simple:
+        acknowledge-mode: manual   # cada consumidor hace ACK/NACK explícito
+        prefetch: 10
+      direct:
+        acknowledge-mode: manual
+
+  # Conexión al clúster Kafka (3 brokers, ver docker-compose.kafka.yml).
+  # Los puertos 9092/9093/9094 son los listeners EXTERNOS de cada broker.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9093,localhost:9094}
+    admin:
+      # Crea los tópicos declarados en KafkaTopicsConfig al arrancar.
+      # Con KAFKA_ENABLED=false no se contacta a Kafka.
+      auto-create: ${app.kafka.enabled:true}
+      fail-fast: false          # si Kafka no está disponible, la app igual arranca
+    producer:
+      acks: all                 # el líder espera a las réplicas en sincronía
+      # Serializadores explícitos: la key es String y el valor es el DTO EventoMensajeria.
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      properties:
+        max.block.ms: 2000      # no bloquear la API más de 2 s si Kafka está caído
+        spring.json.add.type.headers: false   # el consumidor usa spring.json.value.default.type
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false # los offsets los confirma el contenedor del listener
+      max-poll-records: 100
+      # Deserializadores explícitos: el valor se convierte directamente a EventoMensajeria.
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+      properties:
+        spring.json.value.default.type: com.biblioteca.messaging.event.EventoMensajeria
+        spring.json.trusted.packages: com.biblioteca.messaging.event
+        spring.json.add.type.headers: false
+        "[isolation.level]": read_committed
+    listener:
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}   # consumidores por tópico (una partición cada uno)
+
+logging:
+  level:
+    com.biblioteca: DEBUG
+    org.springframework.amqp: INFO
+    org.springframework.kafka: INFO
+    org.apache.kafka: WARN
+
+# =====================================================================
+# Propiedades propias de la aplicación
+# =====================================================================
+app:
+  # Microsoft Entra ID / JWT
+  security:
+    issuer-uri: https://sts.windows.net/a94e2d64-6e37-4765-8ceb-bfe6bc09932b/
+    audience: api://a328191c-fd63-40fc-8994-b9260a828929
+    jwk-set-uri: https://login.microsoftonline.com/a94e2d64-6e37-4765-8ceb-bfe6bc09932b/discovery/v2.0/keys
+    # Orígenes permitidos por CORS (separados por coma).
+    cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+
+  # ---------------------------------------------------------------
+  # Topología de RabbitMQ: TODOS los nombres de colas, exchanges y
+  # routing keys viven aquí. El código Java solo los lee.
+  # ---------------------------------------------------------------
+  rabbit:
+    vhost: /
+    # API HTTP del plugin management (se usa para LISTAR colas, exchanges y bindings).
+    management:
+      url: ${RABBITMQ_MANAGEMENT_URL:http://localhost:15672}
+
+    retry:
+      max-attempts: 3          # reintentos ante errores recuperables antes de ir a la DLQ
+
+    # Si es true (valor por defecto), un listener consume las DLQ y registra cada
+    # mensaje no entregado en los logs (nivel ERROR, con cola de origen y motivo).
+    # Con RABBIT_DLQ_LISTENER_ENABLED=false los mensajes se quedan en la DLQ para
+    # verlos en el panel de RabbitMQ (en ese caso el log lo deja el consumidor
+    # original al rechazar el mensaje).
+    dlq-listener:
+      enabled: ${RABBIT_DLQ_LISTENER_ENABLED:true}
+
+    exchanges:
+      direct: biblioteca.direct   # tickets y documentos (routing key exacta)
+      topic: biblioteca.topic     # notificaciones (routing key con patrón)
+      dlx: biblioteca.dlx         # dead letter exchange compartido por las 3 DLQ
+
+    queues:
+      notificaciones:
+        name: notificaciones.queue
+        routing-key: notificacion.#          # patrón de binding (exchange topic)
+        dlq: notificaciones.dlq
+        dlq-routing-key: notificaciones.dead
+      tickets:
+        name: tickets.queue
+        routing-key: ticket.crear            # binding exacto (exchange direct)
+        dlq: tickets.dlq
+        dlq-routing-key: tickets.dead
+      documentos:
+        name: documentos.queue
+        routing-key: documento.generar       # binding exacto (exchange direct)
+        dlq: documentos.dlq
+        dlq-routing-key: documentos.dead
+
+    # Routing keys con las que se PUBLICAN los eventos de préstamos
+    # (calzan con el patrón notificacion.# del binding de notificaciones).
+    routing:
+      notificacion-prestamo-creado: notificacion.prestamo.creado
+      notificacion-prestamo-devuelto: notificacion.prestamo.devuelto
+
+  # ---------------------------------------------------------------
+  # Kafka: nombres de tópicos y política de reintentos. El código
+  # Java solo los lee (ver KafkaTopicsProperties).
+  # ---------------------------------------------------------------
+  kafka:
+    enabled: ${KAFKA_ENABLED:true}   # false = no crea tópicos, no consume y no publica
+    # Un grupo por responsabilidad: cada tópico se balancea de forma independiente
+    # y el consumidor de DLT no comparte offsets con los tópicos de negocio.
+    groups:
+      notificaciones: ${KAFKA_GROUP_NOTIFICACIONES:biblioteca-notificaciones}
+      prestamos: ${KAFKA_GROUP_PRESTAMOS:biblioteca-prestamos}
+      dlt: ${KAFKA_GROUP_DLT:biblioteca-dlt}
+    dlt-suffix: .DLT                 # el tópico muerto de "x" se llama "x.DLT"
+    send-timeout-seconds: 5          # espera máxima de la confirmación del broker al publicar
+    listener:
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
+
+    topics:
+      notificaciones: biblioteca.notificaciones
+      prestamos: biblioteca.prestamos
+
+    # Valores con los que se crean los tópicos al arrancar. Con 3 brokers
+    # (docker-compose.kafka.yml) usar replicas=3; con un solo broker, replicas=1.
+    topic-defaults:
+      partitions: ${KAFKA_TOPIC_PARTITIONS:3}
+      replicas: ${KAFKA_TOPIC_REPLICAS:3}
+    # Configuración explícita de los tópicos de negocio (no se deja al broker).
+    topic-configs:
+      "[retention.ms]": ${KAFKA_TOPIC_RETENTION_MS:604800000}   # 7 días
+      "[cleanup.policy]": ${KAFKA_TOPIC_CLEANUP_POLICY:delete}
+    # Los DLT se conservan menos tiempo y también tienen política explícita.
+    dlt-configs:
+      "[retention.ms]": ${KAFKA_DLT_RETENTION_MS:86400000}      # 24 horas
+      "[cleanup.policy]": ${KAFKA_DLT_CLEANUP_POLICY:delete}
+
+    retry:
+      max-attempts: 3                # reintentos adicionales tras el primer intento (4 entregas) antes de ir al DLT
+      backoff-ms: 1000
+
+    # Intervalo que el frontend debe usar al hacer polling de /api/kafka/metrics.
+    metrics:
+      polling-interval-seconds: ${KAFKA_METRICS_POLLING_SECONDS:5}

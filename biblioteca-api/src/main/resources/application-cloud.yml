@@ -1,0 +1,34 @@
+# =====================================================================
+# Perfil "cloud": conecta el backend a una base de datos PostgreSQL en la nube
+# (Neon, Supabase, AWS RDS, Azure Database for PostgreSQL, etc.).
+#
+# Activar con:   SPRING_PROFILES_ACTIVE=cloud
+#   (o)          ./mvnw spring-boot:run -Dspring-boot.run.profiles=cloud
+#
+# Variables de entorno OBLIGATORIAS (no se guardan en el repositorio):
+#   DB_URL        jdbc:postgresql://<host>:5432/<base>?sslmode=require
+#   DB_USERNAME   usuario de la base de datos
+#   DB_PASSWORD   contraseña de la base de datos
+# =====================================================================
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 5          # los planes gratuitos cloud limitan las conexiones
+      minimum-idle: 1
+      connection-timeout: 20000
+
+  jpa:
+    hibernate:
+      # "update" crea/ajusta las tablas desde las entidades JPA. Para producción
+      # real conviene "validate" + migraciones (Flyway/Liquibase).
+      ddl-auto: ${DDL_AUTO:update}
+    show-sql: false
+    open-in-view: false
+
+  h2:
+    console:
+      enabled: false                # la consola H2 no se expone en la nube

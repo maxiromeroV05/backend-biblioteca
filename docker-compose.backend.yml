@@ -1,0 +1,91 @@
+# =====================================================================
+# Los 3 microservicios Spring Boot del backend Biblioteca.
+#
+#   docker compose -f docker-compose.kafka.yml up -d      # primero Kafka
+#   docker compose -f docker-compose.yml up -d            # y RabbitMQ
+#   docker compose -f docker-compose.backend.yml up -d --build
+#
+# Cada microservicio se construye desde el mismo Dockerfile indicando
+# su módulo Maven (ARG SERVICE). Los puertos se pueden cambiar en .env
+# con API_PORT / KAFKA_ADMIN_PORT / RABBIT_ADMIN_PORT.
+#
+# Las redes son las que crean los compose de infraestructura: por eso
+# hay que levantar primero esos clústeres (o crear las redes a mano).
+# =====================================================================
+name: biblioteca-backend
+
+x-backend-common: &backend-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  environment: &backend-env
+    SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
+    DB_URL: ${DB_URL:-}
+    DB_USERNAME: ${DB_USERNAME:-}
+    DB_PASSWORD: ${DB_PASSWORD:-}
+    DDL_AUTO: ${DDL_AUTO:-update}
+    RABBITMQ_ADDRESSES: rabbit1:5672,rabbit2:5672
+    RABBITMQ_USER: ${RABBITMQ_USER:-biblioteca}
+    RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-biblioteca123}
+    RABBITMQ_MANAGEMENT_URL: http://rabbit1:15672
+    KAFKA_BOOTSTRAP_SERVERS: kafka1:29092,kafka2:29092,kafka3:29092
+    KAFKA_TOPIC_REPLICAS: ${KAFKA_TOPIC_REPLICAS:-3}
+    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4200}
+  networks:
+    - rabbit-net
+    - kafka-net
+
+services:
+  biblioteca-api:
+    <<: *backend-common
+    container_name: biblioteca-api
+    image: biblioteca-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: biblioteca-api
+    environment:
+      <<: *backend-env
+      API_PORT: ${API_PORT:-8080}
+    ports:
+      - "${API_PORT:-8080}:${API_PORT:-8080}"
+
+  biblioteca-admin-kafka:
+    <<: *backend-common
+    container_name: biblioteca-admin-kafka
+    image: biblioteca-admin-kafka:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: biblioteca-admin-kafka
+    environment:
+      <<: *backend-env
+      KAFKA_ADMIN_PORT: ${KAFKA_ADMIN_PORT:-8081}
+    ports:
+      - "${KAFKA_ADMIN_PORT:-8081}:${KAFKA_ADMIN_PORT:-8081}"
+
+  biblioteca-admin-rabbit:
+    <<: *backend-common
+    container_name: biblioteca-admin-rabbit
+    image: biblioteca-admin-rabbit:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: biblioteca-admin-rabbit
+    environment:
+      <<: *backend-env
+      RABBIT_ADMIN_PORT: ${RABBIT_ADMIN_PORT:-8082}
+    ports:
+      - "${RABBIT_ADMIN_PORT:-8082}:${RABBIT_ADMIN_PORT:-8082}"
+
+networks:
+  rabbit-net:
+    name: biblioteca-rabbit_rabbit-net
+    external: true
+  kafka-net:
+    name: biblioteca-kafka-net
+    external: true

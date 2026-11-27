@@ -1,0 +1,10 @@
+# Microservicio administrador de RabbitMQ: colas, exchanges, bindings
+# y publicación de prueba.
+spring:
+  application:
+    name: biblioteca-admin-rabbit
+  config:
+    import: classpath:application-common.yml
+
+server:
+  port: ${RABBIT_ADMIN_PORT:8082}

@@ -1,0 +1,60 @@
+# =====================================================================
+# Solo se sube lo que corresponde a un proyecto Java / Spring Boot / Maven.
+# =====================================================================
+
+# --- Maven: resultados de compilación ---
+/target/
+**/target/
+
+# --- Clases compiladas ---
+*.class
+
+# --- Salidas de compilación de los IDEs ---
+/out/
+/bin/
+
+# --- Archivos autogenerados por Spring Initializr ---
+HELP.md
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Secretos y configuración local (NUNCA subir credenciales) ---
+.env
+.env.*
+!.env.example
+application-local.yml
+application-local.properties
+application-secret*.yml
+*.pem
+*.key
+
+# --- Datos locales de las bases de datos de desarrollo ---
+*.mv.db
+*.trace.db
+*.h2.db
+
+# --- Volúmenes locales de docker-compose ---
+/data/
+
+# --- IDEs ---
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+.apt_generated/
+.springBeans
+.sts4-cache/
+nbproject/
+nbbuild/
+nbdist/
+
+# --- Sistema operativo ---
+.DS_Store
+Thumbs.db
