@@ -20,7 +20,7 @@ Archivos de infraestructura:
 | `docker-compose.kafka-ui.yml` | Kafka-UI |
 | `docker-compose.backend.yml` | Los 3 microservicios Spring Boot |
 
-Documentación de apoyo: [CONTRATO-API-KAFKA.md](CONTRATO-API-KAFKA.md) y [RABBITMQ.md](RABBITMQ.md).
+Documentación de apoyo: [CONTRATO-API-KAFKA.md](CONTRATO-API-KAFKA.md), [RABBITMQ.md](RABBITMQ.md) y [GUIA-EVIDENCIAS-EP5.md](GUIA-EVIDENCIAS-EP5.md) (fotos, referencias `EV-xx` y rúbrica; también hay versión Word).
 
 ## Qué hace
 
