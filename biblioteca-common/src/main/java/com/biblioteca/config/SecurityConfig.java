@@ -73,7 +73,15 @@ public class SecurityConfig {
                         .requestMatchers("/h2-console/**").permitAll()
                         .requestMatchers("/api/public/**").permitAll()
                         .requestMatchers("/error").permitAll()
-                        // Todo /api/** (incluido /api/rabbit/** y /api/notificaciones) exige JWT válido.
+                        // Catálogo de consulta pública: se puede explorar sin iniciar sesión.
+                        // Solo lectura; crear/editar/borrar sigue exigiendo JWT.
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/libros/**",
+                                "/api/autores/**",
+                                "/api/categorias/**"
+                        ).permitAll()
+                        // Todo lo demás (préstamos, notificaciones, usuarios, admin, auditoría) exige JWT válido.
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().authenticated()
                 )
